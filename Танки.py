@@ -220,56 +220,77 @@ sock.send(player_name.encode())
 my_data = sock.recv(1024).decode().strip().split(',')
 my_id = int(my_data[0])
 my_x, my_y, my_angle = int(my_data[1]), int(my_data[2]), int(my_data[3])
-
-my_data = sock.recv(1024).decode().strip().split(',')
-my_id = int(my_data[0])
-my_x, my_y, my_angle = int(my_data[1]), int(my_data[2]), int(my_data[3])
 sock.setblocking(False)
-
-def receive_data():
-    global all_players, game, lucky_block, scores, my_x, my_y
-    while game:
-        try:
-            raw_data = sock.recv(4096).decode().strip()
-            if not raw_data: continue
-
-            for data in raw_data.split('\n'):
-                if data.startswith("SPAWN_LB"):
-                    _, x, y, eff = data.split(',')
-                    lucky_block.update({"x": int(x), "y": int(y), "eff": int(eff), "active": True})
-                
-                elif data == "DESTROY_LB":
-                    lucky_block["active"] = False
-
-                elif data.startswith("TELEPORT"):
-                    _, nx, ny = data.split(',')
-                    my_x, my_y = int(nx), int(ny) # Оновлюємо твої координати
-
-                elif data.startswith("SCORE_UPDATE"):
-                    _, player_id, score = data.split(',')
-                    scores[int(player_id)] = int(score)
-
-                elif '|' in data or (',' in data and len(data.split(',')) == 5):
-                    parts = data.strip('|').split('|')
-                    new_list = []
-                    for p in parts:
-                        p_data = p.split(',')
-                        if len(p_data) == 5:
-                            pid = int(p_data[0])
-                            if pid != my_id:
-                                new_list.append([pid, int(p_data[1]), int(p_data[2]), int(p_data[3]), p_data[4]])
-                    all_players = new_list
-        except: pass
-
-game = True # Прапорець для роботи потоку
+running = True
+all_players_dict = {}
 all_players = [] # Список для зберігання даних інших гравців
 scores = {} # Словник для очок
+
+def receive_data():
+    global all_players, bullets, scores, all_players_dict
+    while running:
+        try:
+            raw_data = sock.recv(4096).decode().strip()
+            if not raw_data: 
+                continue
+
+            # Розбиваємо пакет на окремі рядки (повідомлення)
+            for line in raw_data.split('\n'):
+                parts = line.split(',')
+                if len(parts) < 2: 
+                    continue
+                
+                msg_type = parts[0]
+                
+                # --- ЛОГІКА ГРАВЦІВ ---
+                if msg_type == "P": 
+                    # Формат: P, id, x, y, angle, name
+                    if len(parts) >= 6:
+                        pid = int(parts[1])
+                        if pid != my_id:
+                            px = int(parts[2])
+                            py = int(parts[3])
+                            p_angle = int(parts[4])
+                            p_name = parts[5]
+                            
+                            # Оновлюємо дані у словнику
+                            all_players_dict[pid] = [pid, px, py, p_angle, p_name]
+                            # Оновлюємо список для малювання
+                            all_players = list(all_players_dict.values())
+
+                # --- ЛОГІКА КУЛЬ ---
+                elif msg_type == "B": 
+                    # Формат: B, x, y, angle, is_nuke
+                    if len(parts) >= 5:
+                        bx, by = float(parts[1]), float(parts[2])
+                        ba, bn = float(parts[3]), int(parts[4])
+                        
+                        # Створюємо ворожу кулю
+                        is_nuke = (bn == 1)
+                        enemy_bullet = Bullet(
+                            bullet_img, bx, by, ba, 
+                            speed=15 if is_nuke else 7, 
+                            owner="enemy"
+                        )
+                        
+                        if is_nuke:
+                            enemy_bullet.is_nuclear = True
+                            # Масштабуємо візуально
+                            orig_w, orig_h = enemy_bullet.image.get_size()
+                            enemy_bullet.image = transform.scale(enemy_bullet.image, (orig_w*3, orig_h*3))
+                            enemy_bullet.rect = enemy_bullet.image.get_rect(center=(bx, by))
+                            enemy_bullet.mask = mask.from_surface(enemy_bullet.image)
+                        
+                        bullets.append(enemy_bullet)
+                        
+        except Exception as e:
+            # Можна розкоментувати для відладки: print(f"Помилка мережі: {e}")
+            pass
 
 # Запускаємо потік
 recv_thread = Thread(target=receive_data, daemon=True)
 recv_thread.start()
 
-running = True
 while running:
     
     current_time = time.get_ticks()
@@ -326,6 +347,11 @@ while running:
 
                     # 5. Додаємо в список та оновлюємо таймери
                     bullets.append(new_bullet)
+                    nuke_val = 1 if is_nuke else 0
+                    msg_bullet = f"B,{bx},{by},{p1_angle},{nuke_val}"
+                    try:
+                        sock.send(msg_bullet.encode())
+                    except: pass
                     ammo -= 1
                     last_shot_time = last_reload = current_time
     # Регенерація набоїв
@@ -367,20 +393,7 @@ while running:
         
         # Перевірка межі екрана та стін для повороту
         collision = not screen.get_rect().contains(new_rect)
-        if not collision and not is_ghost:
-            for b in Blocks:
-                # У циклі перевірки колізій танка (for b in Blocks):
-                if p1_mask.overlap(b.mask, (b.rect.x - new_rect.x, b.rect.y - new_rect.y)):
-                    # Перевіряємо, чи це саме наш блок смерті
-                    if b == death_block_up:
-                        if current_time > p1_shield_untill: # Якщо немає активного щита
-                            p1_alive = False
-                            p1_respawn_time = current_time + 5000
-                            create_particles(p1_center_x, p1_center_y, (255, 0, 0), count=30)
-                            p2_score += 1 # Очко ворогу за твою помилку
-                    else:
-                        collision = True
-                        break
+        
         if collision:
             p1_angle = old_angle
             # Важливо: негайно перераховуємо маску назад, 
@@ -388,9 +401,6 @@ while running:
             rotated_img = transform.rotate(my_gun_base, p1_angle)
             p1_mask = mask.from_surface(rotated_img)
             new_rect = rotated_img.get_rect(center=(p1_center_x, p1_center_y))
-        # Зберігаємо старі координати перед будь-яким рухом
-        start_x, start_y = p1_center_x, p1_center_y
-
         # Зберігаємо старі координати перед будь-яким рухом
         start_x, start_y = p1_center_x, p1_center_y
 
@@ -471,18 +481,6 @@ while running:
             score += 1
             p2_alive = False
             p2_respawn_time = current_time + 5000
-    # ------------------------------------------------------------------
-        
-        if p1_alive and p1_current_rect.colliderect(death_block.rect):
-            # Оскільки маска тепер оновлюється на початку кадру, overlap спрацює точно
-            offset = (death_block.rect.x - p1_current_rect.x, death_block.rect.y - p1_current_rect.y)
-            if p1_mask.overlap(death_block.mask, offset):
-                if current_time > p1_shield_untill:
-                    p1_hp = 0
-                    p1_alive = False
-                    p1_respawn_time = current_time + 5000
-                    p1_center_x, p1_center_y = p1_start_pos
-
     # --- ПЕРЕВІРКА ЛАКІБЛОКУ  ---
     if lucky_obj is not None:
         offset_lucky = (lucky_obj.rect.x - new_rect.x, lucky_obj.rect.y - new_rect.y)
@@ -520,14 +518,12 @@ while running:
                     bx = p1_center_x + (40 * cos(r_rad))
                     by = p1_center_y - (40 * sin(r_rad))
                     
-                    # ВАЖЛИВО: додайте bullet_img (вашу картинку кулі) на перше місце!
                     new_b = Bullet(bullet_img, bx, by, current_angle, speed=0.4, ghost=True, owner="player")
                     bullets.append(new_b)
 
             elif eff == 7:
                 speed_mod, speed_effect_until = 1.6, current_time + 7000
                 current_effect_text = "ПРИСКОРЕННЯ"
-            # НОВІ ЕФЕКТИ:
             elif eff == 8:
                 stun_until = current_time + 2000 # Стан гравця на 2 секунди
                 current_effect_text = "СТАН!"
@@ -539,12 +535,11 @@ while running:
                 has_nuke_shot = True  # Активуємо прапорець
                 effect_text_until = current_time + 2000
 
-    # ОБРОБКА КУЛЬ
+    # --- ОБРОБКА КУЛЬ ---
     for bullet in bullets[:]:
         bullet.update()
 
         if hasattr(bullet, 'is_nuclear') and bullet.is_nuclear:
-            # Створюємо помаранчеві та жовті іскри за кулею
             create_particles(bullet.rect.centerx, bullet.rect.centery, (255, 150, 0), count=2)
         
         # 1. Вихід за межі екрана
@@ -552,28 +547,25 @@ while running:
             if bullet in bullets: bullets.remove(bullet)
             continue
         
-        # 2. Перевірка влучання в стіни
+        # 2. Перевірка стін
         hit_wall = False
         if not bullet.ghost:
             for b in Blocks:
                 if bullet.rect.colliderect(b.rect):
-                    # ДОДАЄМО УМОВУ: якщо куля НЕ ядерна, вона вдаряється
                     if not (hasattr(bullet, 'is_nuclear') and bullet.is_nuclear):
                         create_particles(bullet.rect.centerx, bullet.rect.centery, (150, 150, 150), count=5)
                         hit_wall = True
                         break
                     else:
-                        # Якщо ядерна — просто лишаємо трохи іскор при прольоті крізь стіну
-                        if current_time % 5 == 0: # не кожний кадр, щоб не лагало
+                        if current_time % 5 == 0:
                             create_particles(bullet.rect.centerx, bullet.rect.centery, (255, 200, 0), count=2)
         
         if hit_wall:
             if bullet in bullets: bullets.remove(bullet)
-            continue # Куля зникла, переходимо до наступної
+            continue
 
-        # 3. Перевірка влучання у ВОРОГА
+        # 3. Влучання у ВОРОГА
         if p2_alive and bullet.owner == "player" and bullet.rect.colliderect(p2_rect):
-            # Якщо куля була ядерною — робимо ГІГАНТСЬКИЙ вибух
             p_count = 50 if (hasattr(bullet, 'is_nuclear') and bullet.is_nuclear) else 15
             create_particles(bullet.rect.centerx, bullet.rect.centery, (255, 100, 0), count=p_count)
             
@@ -585,143 +577,89 @@ while running:
             if bullet in bullets: bullets.remove(bullet)
             continue
 
-        # 4. Перевірка влучання у ГРАВЦЯ (тебе)
+        # 4. Влучання в ТЕБЕ (P1)
         if p1_alive and bullet.owner != "player" and bullet.rect.colliderect(new_rect):
             if p1_mask.overlap(bullet.mask, (bullet.rect.x - new_rect.x, bullet.rect.y - new_rect.y)):
-                # Колір залежить від щита
-                p_color = (0, 255, 255) if current_time < shield_until else (255, 255, 255)
+                if current_time < p1_shield_untill:
+                    p_color = (255, 255, 255)
+                elif current_time < shield_until:
+                    p_color = (0, 255, 255)
+                else:
+                    p_color = (50, 255, 50)
+
                 create_particles(bullet.rect.centerx, bullet.rect.centery, p_color, count=12)
-                
-                if current_time > p1_shield_untill:
+
+                if current_time >= p1_shield_untill and current_time >= shield_until:
                     p1_hp -= 5
                     if p1_hp <= 0:
                         p1_alive = False
                         p1_respawn_time = current_time + 5000
+                        p2_score += 1
                 
                 if bullet in bullets: bullets.remove(bullet)
                 continue
-        
 
-    # --- ОБРОБКА ЧАСТИНОК (в while running, після куль) ---
+    # --- ОБРОБКА ЧАСТИНОК ---
     for particle in particles[:]:
         particle.update()
         if particle.lifetime <= 0:
             particles.remove(particle)
-    
-        
-        # Перевірка влучання у гравця
-        if p1_alive and bullet.owner != "player" and bullet.rect.colliderect(new_rect):
-            if p1_mask.overlap(bullet.mask, (bullet.rect.x - new_rect.x, bullet.rect.y - new_rect.y)):
-                
-                # --- ПЕРЕВІРКА ВЛУЧАННЯ В ЩИТ ---
-                # Якщо білий щит (відродження)
-                if current_time < p1_shield_untill:
-                    create_particles(bullet.rect.centerx, bullet.rect.centery, (255, 255, 255), count=10) # Білі частинки
-                    if bullet in bullets: bullets.remove(bullet) # Куля зникає
-                    continue # Переходимо до наступної кулі
-                
-                # Якщо блакитний щит (лакіблок)
-                elif current_time < shield_until:
-                    create_particles(bullet.rect.centerx, bullet.rect.centery, (0, 255, 255), count=10) # Блакитні частинки
-                    if bullet in bullets: bullets.remove(bullet) # Куля зникає
-                    continue # Переходимо до наступної кулі
-                
-                # --- Якщо щитів немає (звичайна смерть) ---
-                else:
-                    create_particles(bullet.rect.centerx, bullet.rect.centery, (50, 255, 50), count=15) # Зелені частинки
-        # Додаємо умову: bullet.owner != "player"
-        if p1_alive and bullet.owner != "player" and bullet.rect.colliderect(new_rect):
-            if p1_mask.overlap(bullet.mask, (bullet.rect.x - new_rect.x, bullet.rect.y - new_rect.y)):
-                if current_time > p1_shield_untill: # Якщо немає білого щита
-                    p1_hp -= 5
-                    if p1_hp <= 0:
-                        p1_alive = False
-                        p1_respawn_time = current_time + 5000
-                bullets.remove(bullet)
-                continue
-    # Відродження гравця
+
+    # --- ВІДРОДЖЕННЯ ТА МЕРЕЖА ---
     if not p1_alive and current_time >= p1_respawn_time:
         p1_alive = True
         p1_hp = 5
         p1_center_x, p1_center_y = p1_start_pos
-        p1_shield_untill = current_time + 5000 # Білий щит на 5 секунд
+        p1_shield_untill = current_time + 5000
 
-    # --- МАЛЮВАННЯ (DRAWING BLOCK) ---
+    # --- МАЛЮВАННЯ ---
     screen.blit(background, (0, 0))
-    
-    # 1. Малюємо статичні об'єкти
     for b in Blocks: b.draw(screen)
     death_block.draw(screen) 
     death_block_up.draw(screen)
     if lucky_obj: lucky_obj.draw(screen)
     
-    # 2. Малюємо кулі
-    for b in bullets: 
-        screen.blit(b.image, b.rect)
-    
-    # 3. Малюємо частинки
-    for particle in particles:
-        particle.draw(screen)
+    for b in bullets: screen.blit(b.image, b.rect)
+    for particle in particles: particle.draw(screen)
 
-    # 4. МАЛЮВАННЯ ГРАВЦЯ (P1)
     if p1_alive:
-        # Ефект "миготіння" при стані (якщо застанений — миготить)
         if not is_stunned or (current_time // 200 % 2):
             screen.blit(rotated_img, new_rect)
-        
-        # ЄДИНИЙ БІЛИЙ ЩИТ (відродження або лакіблок)
         if current_time < p1_shield_untill:
             draw.circle(screen, (255, 255, 255), (int(p1_center_x), int(p1_center_y)), 60, 3)
-            
         draw_player_label(player_name, label_font, p1_center_x, p1_center_y - 70)
     
-    # 5. МАЛЮВАННЯ ВОРОГА (P2)
-    # У циклі малювання (DRAWING BLOCK)
     for p_id, px, py, p_angle, p_name in all_players:
-            # Повертаємо спрайт ворога
         rot_p2 = transform.rotate(gun_raw, p_angle)
         p2_rect_current = rot_p2.get_rect(center=(px, py))
         screen.blit(rot_p2, p2_rect_current)
-            
-            # Малюємо ім'я ворога над ним
         draw_player_label(p_name, small_font, px, py - 60)
-                # Щит ворога (білий)
         if current_time < p2_shield_end:
-            draw.circle(screen, (255, 255, 255), p2_rect.center, 60, 3)
+            draw.circle(screen, (255, 255, 255), p2_rect_current.center, 60, 3)
     
-    # 6. ІНТЕРФЕЙС (UI)
-    # Набої та твої очки (зліва)
-    screen.blit(label_font.render(f"Набої: {ammo}/{max_ammo}", True, (255, 255, 255)), (20, 20))
-    screen.blit(label_font.render(f"ВАШІ ОЧКИ: {score}", True, (0, 255, 0)), (20, 440))
-
-    # Очки ворога (справа)
+    # UI та інше (без змін)
+    screen.blit(label_font.render(f"НАБОЇ: {ammo}/{max_ammo}", True, (255, 255, 255)), (20, 20))
+    screen.blit(label_font.render(f"ОЧКИ: {score}", True, (0, 255, 0)), (20, 440))
     p2_score_text = label_font.render(f"ОЧКИ ВОРОГА: {p2_score}", True, (255, 50, 50))
-    p2_score_rect = p2_score_text.get_rect(topright=(screen_width - 20, 440))
-    screen.blit(p2_score_text, p2_score_rect)
+    screen.blit(p2_score_text, p2_score_text.get_rect(topright=(screen_width - 20, 440)))
 
-    # 7. ПОВІДОМЛЕННЯ ПРО ЕФЕКТИ ТА ТАЙМЕРИ
+    # Таймери ефектів
     max_end = max(inv_ws_until, inv_ad_until, inv_qe_until, ghost_mode_until, 
-                  stun_until, speed_effect_until, p1_shield_untill, p2_stun_until, big_bullet_until, effect_text_until)
+                  stun_until, speed_effect_until, p1_shield_untill, p2_stun_until, effect_text_until)
 
     if current_time < max_end:
-        # Визначаємо колір тексту (червоний для поганих ефектів, зелений для добрих)
         is_bad = current_time < stun_until or (speed_mod < 1 and current_time < speed_effect_until)
         txt_color = (255, 50, 50) if is_bad else (100, 255, 100)
-        
         draw_center_text(current_effect_text, txt_color)
-        
         time_left = (max_end - current_time) / 1000
         if time_left > 0.1:
-            timer_text = main_font.render(f"ЕФЕКТ: {time_left:.1f}с", True, txt_color)
+            timer_text = main_font.render(f"ЕФФЕКТ: {time_left:.1f}с", True, txt_color)
             screen.blit(timer_text, (screen_width // 2 - timer_text.get_width() // 2, 20))
-            
     elif lucky_obj is None:
-        # Таймер до появи нового лакіблоку
         timer_val = max(0, (next_lucky_spawn - current_time) / 1000)
         lb_timer = main_font.render(f"ДО НОВОГО ЛАКІБЛОКУ: {timer_val:.1f}с", True, (255, 165, 0))
         screen.blit(lb_timer, (screen_width // 2 - lb_timer.get_width() // 2, 20))
 
-    # 8. ПОВІДОМЛЕННЯ ПРО СМЕРТЬ ТА ВІДРОДЖЕННЯ (Пріоритет зверху)
     if not p1_alive:
         rt_p1 = max(0, int((p1_respawn_time - current_time) / 1000))
         resp_text = label_font.render(f"ВИ ЗАГИНУЛИ! Відродження: {rt_p1}с", True, (255, 0, 0))
@@ -729,19 +667,14 @@ while running:
 
     if not p2_alive:
         rt_p2 = max(0, int((p2_respawn_time - current_time) / 1000))
-        p2_dead_text = label_font.render(f"ВОРОГ ЗНИЩЕНИЙ! Поява через: {rt_p2}с", True, (0, 255, 0))
-        # screen_height - 60 поставить напис над нижньою межею екрана
-        p2_rect_ui = p2_dead_text.get_rect(center=(screen_width // 2, screen_height - 60))
-        screen.blit(p2_dead_text, p2_rect_ui)
+        p2_dead_text = label_font.render(f"ВОРОГ ЗНИЩЕНИЙ! Поява: {rt_p2}с", True, (0, 255, 0))
+        screen.blit(p2_dead_text, p2_dead_text.get_rect(center=(screen_width // 2, screen_height - 60)))
 
     try:
-        # P - префікс позиції, щоб сервер розумів тип повідомлення
         msg = f"P,{my_id},{int(p1_center_x)},{int(p1_center_y)},{int(p1_angle)}"
         sock.send(msg.encode())
-    except:
-        pass
+    except: pass
 
     display.update()
     clock.tick(60)
-
 quit()
