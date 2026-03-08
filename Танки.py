@@ -10,7 +10,7 @@ player_name, port, host = menu.name, menu.port, menu.host
 my_x, my_y, my_angle = 100, 100, 0
 
 init()
-screen = display.set_mode(800, 500)
+screen = display.set_mode((800, 500))
 display.set_caption("Стрілялки")
 gun_raw = image.load("gun.png").convert_alpha()
 display.set_icon(gun_raw)
@@ -82,7 +82,7 @@ gun_raw = transform.scale(gun_raw, (100, 65))
 my_gun_base = transform.flip(gun_raw, True, False)
 bullet_img = image.load("bullet.png").convert_alpha()
 bullet_img = transform.scale(bullet_img, (50, 18))
-background = transform.scale(image.load("space.jpg"), 800, 500)
+background = transform.scale(image.load("space.jpg"), (800, 500))
 class Bullet:
     def __init__(self, image, x, y, angle, speed, ghost=False, owner="player"):
         self.original_image = image
@@ -129,6 +129,7 @@ Blocks = [
     Block(235, 75, 20, 125, (255, 255, 0)), Block(130, 180, 125, 20, (255, 255, 0)),
     Block(545, 300, 20, 125, (255, 255, 0)), Block(545, 300, 125, 20, (255, 255, 0))
 ]
+lose = False
 death_block = Block(0, 490, 800, 20, (255, 0, 0))
 death_block_up = Block(0, -10, 800, 20, (255, 0, 0))
 p1_angle = 0
@@ -175,6 +176,7 @@ running = True
 all_players_dict = {}
 all_players = []
 scores = {}
+
 def receive_data():
     global all_players, bullets, scores, all_players_dict
     while running:
@@ -271,7 +273,7 @@ while running:
     new_rect = rotated_img.get_rect(center=(p1_center_x, p1_center_y))
     p1_mask = mask.from_surface(rotated_img)
 
-    if not is_stunned and p1_alive:
+    if not is_stunned and p1_alive and not lose:
         keys = key.get_pressed()
         cs = int(base_speed * speed_mod)
         # ЛОГІКА ІНВЕРСІЇ КЛАВІШ
@@ -356,7 +358,7 @@ while running:
     if lucky_obj is not None:
         offset_lucky = (lucky_obj.rect.x - new_rect.x, lucky_obj.rect.y - new_rect.y)
         if p1_mask.overlap(lucky_obj.mask, offset_lucky):
-            eff = randint(1, 10)
+            eff = 10
             lucky_obj = None 
             next_lucky_spawn = 0 
             if eff == 1:
@@ -369,14 +371,14 @@ while running:
                 inv_qe_until = current_time + 10000
                 current_effect_text = "ІНВЕРСІЯ Q / E"
             elif eff == 4:
-                p2_stun_until = current_time + 4000
+                p2_stun_until = current_time + 2000
                 current_effect_text = "ВОРОГ ЗАМЕР!"
             elif eff == 5:
                 ghost_mode_until = current_time + 10000
                 current_effect_text = "РЕЖИМ ПРИВИДА"
             elif eff == 6:
                 current_effect_text = "РАДІАЛЬНИЙ УДАР"
-                effect_text_until = current_time + 3000 
+                effect_text_until = current_time + 1000 
                 num_bullets = 16
                 angle_step = 360.0 / num_bullets 
                 for i in range(num_bullets):
@@ -469,7 +471,7 @@ while running:
             screen.blit(rotated_img, new_rect)
         if current_time < p1_shield_untill:
             draw.circle(screen, (255, 255, 255), (int(p1_center_x), int(p1_center_y)), 60, 3)
-        draw_player_label(player_name, label_font, p1_center_x, p1_center_y - 70)
+        #draw_player_label(player_name, label_font, p1_center_x, p1_center_y - 70)
     for p_id, px, py, p_angle, p_name in all_players:
         rot_p2 = transform.rotate(gun_raw, p_angle)
         p2_rect_current = rot_p2.get_rect(center=(px, py))
@@ -502,10 +504,12 @@ while running:
         rt_p2 = max(0, int((p2_respawn_time - current_time) / 1000))
         p2_dead_text = label_font.render(f"ВОРОГ ЗНИЩЕНИЙ! Поява: {rt_p2}с", True, (0, 255, 0))
         screen.blit(p2_dead_text, p2_dead_text.get_rect(center=(800 // 2, 500 - 60)))
+
     try:
-        msg = f"P,{my_id},{int(p1_center_x)},{int(p1_center_y)},{int(p1_angle)}"
+        msg = f"P,{my_id},{int(p1_center_x)},{int(p1_center_y)},{int(p1_angle)}\n"
         sock.send(msg.encode())
-    except: pass
+    except Exception as e:
+        print(f"Помилка відправки: {e}")
 
     display.update()
     clock.tick(60)
