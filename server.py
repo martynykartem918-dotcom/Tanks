@@ -2,7 +2,7 @@ import socket, threading, time
 
 
 class Server:
-    def __init__(self, host = '192.168.0.134', port = 8080):
+    def __init__(self, host = 'localhost', port = 8080):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -86,9 +86,6 @@ class Server:
         
             if conn in self.clients:
                 self.clients.remove(conn)
-            
-            self.broadcast(f"WIN_DISCONNECT,{pid}\n".encode(), conn)
-            conn.close()
 
     def run(self):
         pid_counter = 0
