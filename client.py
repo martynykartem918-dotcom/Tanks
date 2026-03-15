@@ -16,7 +16,7 @@ display.set_caption('Стрілялки')
 gun_raw = image.load('gun.png').convert_alpha()
 display.set_icon(gun_raw)
 clock = time.Clock()
-mixer.music.load('menu_music.mp3')
+mixer.music.load('music.mp3')
 mixer.music.set_volume(0.07)
 mixer.music.play(-1)
 
@@ -24,29 +24,6 @@ font.init()
 main_font = font.SysFont('Arial', 26)
 small_font = font.SysFont('Arial', 18)
 label_font = font.SysFont('Arial', 28, bold=True)
-win_or_lose_font = font.Font("Comic Sans MS", 85, bold=True)
-win_or_lose_color = None
-win_or_lose_until = None
-
-def draw_win_or_lose(text, win_or_lose_color):
-    if not text:
-        return
-
-    border_color = (0, 0, 0)
-    border_offset = 4
-    
-    for dx in range(-border_offset, border_offset + 1, border_offset):
-        for dy in range(-border_offset, border_offset + 1, border_offset):
-            if dx == 0 and dy == 0:
-                continue
-            
-            border_surf = win_or_lose_font.render(text, True, border_color)
-            border_rect = border_surf.get_rect(center=(800 // 2 + dx, 500 // 2 + dy))
-            screen.blit(border_surf, border_rect)
-            
-    main_surf = win_or_lose_font.render(text, True, win_or_lose_color)
-    main_rect = main_surf.get_rect(center=(800 // 2, 500 // 2))
-    screen.blit(main_surf, main_rect)
 
 def draw_player_label(text, font, x, y):
     text_surf = font.render(text, True, (0, 0, 0))
@@ -265,13 +242,6 @@ def receive_data():
                 elif msg_type == 'T':
                     countdown_value = parts[1]
                     current_effect_text = f'ГРА ПОЧНЕТЬСЯ ЧЕРЕЗ: {countdown_value}'
-
-                elif msg_type == 'D':
-                    pass
-                elif msg_type == "WIN_DISCONNECT":
-                    win_or_lose_text = 'ТЕХНІЧНА ПЕРЕМОГА!'
-                    win_or_lose_color = (0, 255, 0)
-                    win_or_lose_until = time.get_ticks() + 10000
                     
         except Exception as e:
             print(f'Помилка отримання даних: {e}')
@@ -338,7 +308,7 @@ while waiting:
 mouse.set_cursor(SYSTEM_CURSOR_ARROW)
 
 mixer.music.stop()
-mixer.music.load('game_music.mp3')
+mixer.music.load('music.mp3')
 mixer.music.set_volume(0.07)
 mixer.music.play(-1)
 lucky_spawn_delay = 15000
@@ -686,8 +656,6 @@ while running:
         if current_time >= p2_respawn_time:
             p2_alive = True
             p2_shield_end = current_time + 5000
-    if current_time < win_or_lose_until:
-        draw_win_or_lose(win_or_lose_text, win_or_lose_color)
 
     try:
         alive_val = 1 if p1_alive else 0
