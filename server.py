@@ -1,8 +1,9 @@
 import socket, threading, time
 
-
+host = 'localhost'
+port = 8080
 class Server:
-    def __init__(self, host = '192.168.0.134', port = 8080):
+    def __init__(self):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -16,8 +17,8 @@ class Server:
         self.ready_players = set()
         self.countdown_started = False
         self.lock = threading.Lock()
-        print(f'Сервер запущено на {host}:{port}')
-
+        print(f'Сервер запущено на host: {host}; port: {port}')
+        
     def broadcast(self, msg, exclude_id=None):
         data = (msg + '\n').encode()
         with self.lock:
@@ -86,6 +87,9 @@ class Server:
         
             if conn in self.clients:
                 self.clients.remove(conn)
+            
+            self.broadcast(f"WIN_DISCONNECT,{pid}\n".encode(), conn)
+            conn.close()
 
     def run(self):
         pid_counter = 0
