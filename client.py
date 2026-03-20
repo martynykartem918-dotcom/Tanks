@@ -20,7 +20,7 @@ host_entry = CTkEntry(launcher, placeholder_text = 'Введите хост 😊
 host_entry.insert(0, host)
 host_entry.pack(padx = 20, pady = 15, anchor = 'w', fill = 'x')
 
-port_entry = CTkEntry(launcher, placeholder_text = 'Введите порт сервера 😊', height = 50, font = ('Comic Sans MS', 30))
+port_entry = CTkEntry(launcher, placeholder_text = 'Введите порт 😊', height = 50, font = ('Comic Sans MS', 30))
 port_entry.insert(0, port)
 port_entry.pack(padx = 20, anchor = 'w', fill = 'x')
 
